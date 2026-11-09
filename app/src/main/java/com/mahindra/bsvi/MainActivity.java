@@ -1,0 +1,1244 @@
+package com.mahindra.bsvi;
+
+import android.Manifest;
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.ActivityNotFoundException;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.net.Uri;
+import android.os.Bundle;
+import android.provider.MediaStore;
+import android.speech.RecognitionListener;
+import android.speech.RecognizerIntent;
+import android.speech.SpeechRecognizer;
+import android.speech.tts.TextToSpeech;
+import android.webkit.JavascriptInterface;
+import android.webkit.JsPromptResult;
+import android.webkit.JsResult;
+import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
+import android.widget.Toast;
+
+import com.google.mlkit.vision.common.InputImage;
+import com.google.mlkit.vision.text.TextRecognition;
+import com.google.mlkit.vision.text.TextRecognizer;
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions;
+
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+import androidx.core.content.FileProvider;
+
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.Locale;
+
+public class MainActivity extends Activity {
+
+    private static final String API_URL =
+            "https://script.google.com/macros/s/AKfycbzZsW6eHeLy8brP9rCE-pVvK3yJyj9ML3zGoHwiGpHysFL8LwZ660Llvj2l8B1xiA4/exec";
+
+    private static final int REQ_AUDIO = 3001;
+    private static final int REQ_CAMERA = 3002;
+    private static final int REQ_FILE = 3003;
+    private static final int REQ_DIRECT_CAMERA = 3004;
+    private static final int REQ_SPEECH_DIALOG = 3005;
+
+    private WebView web;
+    private SpeechRecognizer speechRecognizer;
+    private TextToSpeech textToSpeech;
+    private ValueCallback<Uri[]> fileCallback;
+    private Uri cameraUri;
+    private String pendingSpeechLocale = "en-IN";
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+
+        // Adjust display cutout (notch / punch hole) handling for modern Android devices
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            try {
+                android.view.WindowManager.LayoutParams lp = getWindow().getAttributes();
+                lp.layoutInDisplayCutoutMode =
+                        android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+                getWindow().setAttributes(lp);
+            } catch (Exception ignored) { }
+        }
+
+        // Clean status and navigation bar colors matching Mahindra theme
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+            getWindow().setStatusBarColor(android.graphics.Color.parseColor("#8E1515"));
+            getWindow().setNavigationBarColor(android.graphics.Color.parseColor("#111820"));
+        }
+
+        web = new WebView(this);
+        setContentView(web);
+
+        configureWebView();
+        textToSpeech = new TextToSpeech(this, status -> { });
+
+        web.loadUrl("file:///android_asset/index.html");
+    }
+
+    private void configureWebView() {
+
+        web.getSettings().setJavaScriptEnabled(true);
+        web.getSettings().setDomStorageEnabled(true);
+        web.getSettings().setAllowFileAccess(true);
+        web.getSettings().setAllowContentAccess(true);
+        web.getSettings().setMediaPlaybackRequiresUserGesture(false);
+
+        // Mobile responsiveness and screen autofit across all Android mobile screen sizes
+        web.getSettings().setUseWideViewPort(true);
+        web.getSettings().setLoadWithOverviewMode(true);
+        web.getSettings().setSupportZoom(false);
+        web.getSettings().setBuiltInZoomControls(false);
+        web.getSettings().setDisplayZoomControls(false);
+        web.setScrollBarStyle(android.view.View.SCROLLBARS_INSIDE_OVERLAY);
+        web.setOverScrollMode(android.view.View.OVER_SCROLL_NEVER);
+
+        web.setWebViewClient(new WebViewClient() {
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+
+                // Normalize Apps Script responses before the existing HTML parser sees them.
+                view.evaluateJavascript(
+                        "(function(){window.__mahindraNormalizeResponse=function(raw){"
+                                + "try{"
+                                + "var o=(typeof raw==='string')?JSON.parse(raw):raw;"
+                                + "var b=o&&o.body;"
+                                + "if(typeof b==='string'){"
+                                + "var hm=b.match(/id=[\"']mahindra-json[\"'][^>]*>([^<]+)</i);"
+                                + "if(hm&&hm[1]){"
+                                + "var hs=hm[1].trim().replace(/-/g,'+').replace(/_/g,'/');while(hs.length%4)hs+='=';"
+                                + "try{var hb=atob(hs),hbytes=new Uint8Array(hb.length);for(var hi=0;hi<hb.length;hi++)hbytes[hi]=hb.charCodeAt(hi);var hdec=new TextDecoder('utf-8').decode(hbytes);JSON.parse(hdec);return JSON.stringify({code:o.code||200,body:hdec});}catch(he){}"
+                                + "}"
+                                + "}"
+                                + "if(typeof b==='string'){"
+                                + "try{JSON.parse(b||'{}');return raw;}"
+                                + "catch(e){"
+                                + "var m=b.match(/<meta[^>]+name=[\\\"']mahindra-json[\\\"'][^>]+content=[\\\"']([^\\\"']+)[\\\"'][^>]*>/i);"
+                                + "if(m&&m[1]){"
+                                + "var s=m[1].replace(/-/g,'+').replace(/_/g,'/');"
+                                + "while(s.length%4)s+='=';"
+                                + "var bin=atob(s),bytes=new Uint8Array(bin.length);"
+                                + "for(var i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);"
+                                + "var decoded=new TextDecoder('utf-8').decode(bytes);"
+                                + "JSON.parse(decoded);"
+                                + "return JSON.stringify({code:o.code||200,body:decoded});"
+                                + "}"
+                                + "var a=b.indexOf('{'),z=b.lastIndexOf('}');"
+                                + "if(a>=0&&z>a){var candidate=b.slice(a,z+1);try{JSON.parse(candidate);return JSON.stringify({code:o.code||200,body:candidate});}catch(e){}}"
+                                + "var err={ok:false,code:(o&&o.code)||0,error:'Backend returned non-JSON response (HTTP '+((o&&o.code)||0)+').',details:b.slice(0,800)};"
+                                + "return JSON.stringify({code:(o&&o.code)||0,body:JSON.stringify(err)});"
+                                + "}"
+                                + "}"
+                                + "return raw;"
+                                + "}catch(e){"
+                                + "var err={ok:false,code:0,error:'Backend response error: '+(e.message||e),details:String(raw).slice(0,800)};"
+                                + "return JSON.stringify({code:0,body:JSON.stringify(err)});"
+                                + "}};})();",
+                        null
+                );
+
+                // Every fresh Activity launch starts unauthenticated.
+                // The WebView shell owns the complete login UI. Do not create a second
+                // native login overlay; that overlay previously caused the wrong dashboard
+                // and made the mobile/password fields appear unreliable.
+                view.evaluateJavascript(
+                        "(function(){if(window.__maAppShellLoaded)return;var s=document.createElement('script');s.src='file:///android_asset/app_shell.js';document.head.appendChild(s);})();",
+                        null
+                );
+            }
+
+            @Override
+            public boolean shouldOverrideUrlLoading(
+                    WebView view,
+                    WebResourceRequest request) {
+
+                return false;
+            }
+        });
+
+        web.setWebChromeClient(new WebChromeClient() {
+
+            @Override
+            public boolean onShowFileChooser(
+                    WebView view,
+                    ValueCallback<Uri[]> callback,
+                    FileChooserParams params) {
+
+                if (fileCallback != null) {
+                    fileCallback.onReceiveValue(null);
+                }
+
+                fileCallback = callback;
+
+                openCameraForFileChooser();
+
+                return true;
+            }
+
+            @Override
+            public boolean onJsAlert(WebView view, String url, String message, JsResult result) {
+                new AlertDialog.Builder(MainActivity.this)
+                        .setTitle("Mahindra Fleet AI")
+                        .setMessage(message != null ? message : "")
+                        .setPositiveButton(android.R.string.ok, (dialog, which) -> result.confirm())
+                        .setCancelable(false)
+                        .create()
+                        .show();
+                return true;
+            }
+
+            @Override
+            public boolean onJsConfirm(WebView view, String url, String message, JsResult result) {
+                new AlertDialog.Builder(MainActivity.this)
+                        .setTitle("Mahindra Fleet AI")
+                        .setMessage(message != null ? message : "")
+                        .setPositiveButton(android.R.string.ok, (dialog, which) -> result.confirm())
+                        .setNegativeButton(android.R.string.cancel, (dialog, which) -> result.cancel())
+                        .setCancelable(false)
+                        .create()
+                        .show();
+                return true;
+            }
+
+            @Override
+            public boolean onJsPrompt(WebView view, String url, String message, String defaultValue, JsPromptResult result) {
+                final android.widget.EditText input = new android.widget.EditText(MainActivity.this);
+                input.setText(defaultValue != null ? defaultValue : "");
+                input.setSingleLine(true);
+                new AlertDialog.Builder(MainActivity.this)
+                        .setTitle("Mahindra Fleet AI")
+                        .setMessage(message != null ? message : "")
+                        .setView(input)
+                        .setPositiveButton(android.R.string.ok, (dialog, which) -> result.confirm(input.getText().toString()))
+                        .setNegativeButton(android.R.string.cancel, (dialog, which) -> result.cancel())
+                        .setCancelable(false)
+                        .create()
+                        .show();
+                return true;
+            }
+        });
+
+        web.addJavascriptInterface(
+                new AndroidBridge(),
+                "AndroidBridge"
+        );
+    }
+
+    private void openDirectCamera() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(
+                    this,
+                    new String[]{Manifest.permission.CAMERA},
+                    REQ_DIRECT_CAMERA
+            );
+            return;
+        }
+
+        try {
+            File dir = new File(getCacheDir(), "camera");
+            if (!dir.exists()) dir.mkdirs();
+
+            String stamp = new SimpleDateFormat(
+                    "yyyyMMdd_HHmmss",
+                    Locale.US
+            ).format(new Date());
+
+            File photo = new File(
+                    dir,
+                    "MAHINDRA_DRIVER_" + stamp + ".jpg"
+            );
+
+            cameraUri = FileProvider.getUriForFile(
+                    this,
+                    "com.mahindra.bsvi.driverguide.fileprovider",
+                    photo
+            );
+
+            Intent i = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+            i.putExtra(MediaStore.EXTRA_OUTPUT, cameraUri);
+            i.addFlags(
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                            | Intent.FLAG_GRANT_READ_URI_PERMISSION
+            );
+
+            if (i.resolveActivity(getPackageManager()) == null) {
+                sendCameraResult(false);
+                Toast.makeText(
+                        this,
+                        "No camera application is available",
+                        Toast.LENGTH_SHORT
+                ).show();
+                return;
+            }
+
+            startActivityForResult(i, REQ_DIRECT_CAMERA);
+        } catch (Exception e) {
+            sendCameraResult(false);
+            Toast.makeText(
+                    this,
+                    "Camera could not be opened",
+                    Toast.LENGTH_SHORT
+            ).show();
+        }
+    }
+
+    private void sendCameraResult(boolean ok) {
+        if (web != null) {
+            web.post(() -> web.evaluateJavascript(
+                    "window.nativeCameraResult && window.nativeCameraResult(" +
+                            (ok ? "true" : "false") + ")",
+                    null
+            ));
+        }
+    }
+
+    private void openCameraForFileChooser() {
+
+        if (ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.CAMERA
+        ) != PackageManager.PERMISSION_GRANTED) {
+
+            ActivityCompat.requestPermissions(
+                    this,
+                    new String[]{Manifest.permission.CAMERA},
+                    REQ_CAMERA
+            );
+
+            return;
+        }
+
+        try {
+
+            File dir = new File(
+                    getCacheDir(),
+                    "camera"
+            );
+
+            if (!dir.exists()) {
+                dir.mkdirs();
+            }
+
+            String stamp =
+                    new SimpleDateFormat(
+                            "yyyyMMdd_HHmmss",
+                            Locale.US
+                    ).format(new Date());
+
+            File photo = new File(
+                    dir,
+                    "MAHINDRA_" + stamp + ".jpg"
+            );
+
+            cameraUri = FileProvider.getUriForFile(
+                    this,
+                    "com.mahindra.bsvi.driverguide.fileprovider",
+                    photo
+            );
+
+            Intent i =
+                    new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+
+            i.putExtra(
+                    MediaStore.EXTRA_OUTPUT,
+                    cameraUri
+            );
+
+            i.addFlags(
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                            | Intent.FLAG_GRANT_READ_URI_PERMISSION
+            );
+
+            startActivityForResult(
+                    i,
+                    REQ_FILE
+            );
+
+        } catch (Exception e) {
+
+            if (fileCallback != null) {
+                fileCallback.onReceiveValue(null);
+                fileCallback = null;
+            }
+
+            Toast.makeText(
+                    this,
+                    "Camera could not be opened",
+                    Toast.LENGTH_SHORT
+            ).show();
+        }
+    }
+
+    public class AndroidBridge {
+
+        @JavascriptInterface
+        public String getSharedApiUrl() {
+            return API_URL;
+        }
+
+
+        @JavascriptInterface
+        public void secureLogin(String mobile, String password) {
+            new Thread(() -> {
+                int code = 0;
+                String response = "";
+                try {
+                    String currentUrl = API_URL;
+                    String requestMethod = "POST";
+                    byte[] data = ("{\"action\":\"login\",\"username\":"
+                            + JSONObject.quote(mobile == null ? "" : mobile)
+                            + ",\"password\":"
+                            + JSONObject.quote(password == null ? "" : password)
+                            + "}").getBytes(StandardCharsets.UTF_8);
+                    String cookie = null;
+
+                    for (int redirect = 0; redirect < 8; redirect++) {
+                        HttpURLConnection c =
+                                (HttpURLConnection) new URL(currentUrl).openConnection();
+                        c.setRequestMethod(requestMethod);
+                        c.setConnectTimeout(45000);
+                        c.setReadTimeout(120000);
+                        c.setUseCaches(false);
+                        c.setUseCaches(false);
+                        c.setInstanceFollowRedirects(false);
+                        c.setRequestProperty("Connection", "close");
+                        c.setRequestProperty("Accept", "application/json, text/plain, */*");
+                        c.setRequestProperty("User-Agent", "MahindraBSVI-DriverGuideAI/1.0");
+                        c.setRequestProperty("Accept-Encoding", "identity");
+                        c.setRequestProperty("Connection", "close");
+                        if (cookie != null && !cookie.isEmpty()) c.setRequestProperty("Cookie", cookie);
+
+                        if ("POST".equals(requestMethod)) {
+                            c.setDoOutput(true);
+                            c.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                            c.setFixedLengthStreamingMode(data.length);
+                            try (OutputStream os = c.getOutputStream()) {
+                                os.write(data);
+                                os.flush();
+                            }
+                        }
+
+                        code = c.getResponseCode();
+                        java.util.Map<String, java.util.List<String>> headers = c.getHeaderFields();
+                        if (headers != null) {
+                            for (java.util.Map.Entry<String, java.util.List<String>> entry : headers.entrySet()) {
+                                if (entry.getKey() != null && "Set-Cookie".equalsIgnoreCase(entry.getKey())
+                                        && entry.getValue() != null) {
+                                    for (String setCookie : entry.getValue()) {
+                                        if (setCookie != null && !setCookie.trim().isEmpty()) {
+                                            cookie = mergeCookie(cookie, extractCookiePair(setCookie));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        String location = c.getHeaderField("X-Redirect-Location");
+                        if (location == null || location.trim().isEmpty()) location = c.getHeaderField("Location");
+
+                        if (code == 412 || code == 301 || code == 302 || code == 303) {
+                            c.disconnect();
+                            if (location == null || location.trim().isEmpty()) {
+                                response = "{\"ok\":false,\"code\":" + code + ",\"error\":\"Backend redirect did not provide a response URL.\"}";
+                                break;
+                            }
+                            currentUrl = new URL(new URL(currentUrl), location).toString();
+                            requestMethod = "GET";
+                            data = new byte[0];
+                            continue;
+                        }
+
+                        if (code == 307 || code == 308) {
+                            c.disconnect();
+                            if (location == null || location.trim().isEmpty()) {
+                                response = "{\"ok\":false,\"code\":" + code + ",\"error\":\"Backend redirect did not provide a response URL.\"}";
+                                break;
+                            }
+                            currentUrl = new URL(new URL(currentUrl), location).toString();
+                            continue;
+                        }
+
+                        java.io.InputStream stream = code >= 400 ? c.getErrorStream() : c.getInputStream();
+                        if (stream == null) stream = new java.io.ByteArrayInputStream(new byte[0]);
+                        BufferedReader br = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8));
+                        StringBuilder sb = new StringBuilder();
+                        String line;
+                        while ((line = br.readLine()) != null) sb.append(line);
+                        br.close();
+                        response = sb.toString().trim();
+                        c.disconnect();
+                        break;
+                    }
+
+                    if (response == null || response.isEmpty()) {
+                        response = "{\"ok\":false,\"code\":" + code + ",\"error\":\"Backend returned an empty response.\"}";
+                    }
+
+                    // Some proxies wrap a JSON response in HTML. Extract the JSON object if present.
+                    if (!(response.startsWith("{") && response.endsWith("}"))) {
+                        int start = response.indexOf("{");
+                        int end = response.lastIndexOf("}");
+                        if (start >= 0 && end > start) response = response.substring(start, end + 1);
+                    }
+                } catch (Exception e) {
+                    response = "{\"ok\":false,\"code\":0,\"error\":\"Network error: "
+                            + escapeJson(e.getMessage()) + "\"}";
+                }
+
+                final String result = response;
+                web.post(() -> web.evaluateJavascript(
+                        "window.appHttpResult && window.appHttpResult("
+                                + JSONObject.quote(result) + ")",
+                        null
+                ));
+            }).start();
+        }
+
+        @JavascriptInterface
+        public void cloudRequest(
+                String method,
+                String url,
+                String body
+        ) {
+            new Thread(() -> {
+                int code = 0;
+                String response = "";
+
+                try {
+                    String currentUrl = url;
+                    String requestMethod = method == null
+                            ? "GET"
+                            : method.toUpperCase(Locale.US);
+
+                    byte[] data = (body == null ? "" : body)
+                            .getBytes(StandardCharsets.UTF_8);
+
+                    /*
+                     * Google Apps Script ContentService uses a redirect/session
+                     * flow. The important rules are:
+                     * 1. Send the original login as POST to the /exec URL.
+                     * 2. Apps Script executes doPost(), then redirects the
+                     *    response to a one-time googleusercontent.com URL.
+                     * 3. Fetch that one-time response URL with GET. Sending
+                     *    POST again to googleusercontent.com causes HTTP 405.
+                     * 4. Preserve the Google session cookie between hops.
+                     */
+                    String cookie = null;
+
+                    for (int redirect = 0; redirect < 8; redirect++) {
+                        HttpURLConnection c =
+                                (HttpURLConnection) new URL(currentUrl).openConnection();
+
+                        c.setRequestMethod(requestMethod);
+                        c.setConnectTimeout(20000);
+                        c.setReadTimeout(90000);
+                        c.setInstanceFollowRedirects(false);
+
+                        c.setRequestProperty(
+                                "Accept",
+                                "application/json, text/plain, */*"
+                        );
+                        c.setRequestProperty(
+                                "User-Agent",
+                                "MahindraBSVI-DriverGuideAI/1.0"
+                        );
+                        c.setRequestProperty("Accept-Encoding", "identity");
+
+                        if (cookie != null && !cookie.isEmpty()) {
+                            c.setRequestProperty("Cookie", cookie);
+                        }
+
+                        if ("POST".equals(requestMethod)) {
+                            c.setDoOutput(true);
+                            c.setRequestProperty(
+                                    "Content-Type",
+                                    "application/json; charset=utf-8"
+                            );
+                            c.setFixedLengthStreamingMode(data.length);
+
+                            try (OutputStream os = c.getOutputStream()) {
+                                os.write(data);
+                                os.flush();
+                            }
+                        }
+
+                        code = c.getResponseCode();
+
+                        /*
+                         * Keep Google's session cookie. In particular this is
+                         * normally the S cookie used for Apps Script sessions.
+                         */
+                        java.util.Map<String, java.util.List<String>> headers = c.getHeaderFields();
+                        if (headers != null) {
+                            // Header-name casing is not guaranteed by HttpURLConnection.
+                            // Read Set-Cookie case-insensitively so the Apps Script S
+                            // session cookie is never lost between redirect hops.
+                            for (java.util.Map.Entry<String, java.util.List<String>> entry : headers.entrySet()) {
+                                String headerName = entry.getKey();
+                                if (headerName != null && "Set-Cookie".equalsIgnoreCase(headerName)) {
+                                    java.util.List<String> cookies = entry.getValue();
+                                    if (cookies != null) {
+                                        for (String setCookie : cookies) {
+                                            if (setCookie != null && !setCookie.trim().isEmpty()) {
+                                                cookie = mergeCookie(cookie, extractCookiePair(setCookie));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        String location = c.getHeaderField("X-Redirect-Location");
+                        if (location == null || location.trim().isEmpty()) {
+                            location = c.getHeaderField("Location");
+                        }
+
+                        /*
+                         * Apps Script executes the POST at /exec, then returns
+                         * a redirect to a one-time googleusercontent.com URL.
+                         * That second URL is read with GET. Repeating the POST
+                         * there is what produces HTTP 405.
+                         */
+                        if (code == 412
+                                || code == HttpURLConnection.HTTP_MOVED_PERM
+                                || code == HttpURLConnection.HTTP_MOVED_TEMP
+                                || code == HttpURLConnection.HTTP_SEE_OTHER) {
+
+                            c.disconnect();
+
+                            if (location == null || location.trim().isEmpty()) {
+                                response =
+                                        "{\"ok\":false,\"code\":"
+                                                + code
+                                                + ",\"error\":\"Backend redirect did not provide a redirect URL.\"}";
+                                break;
+                            }
+
+                            currentUrl = new URL(
+                                    new URL(currentUrl),
+                                    location
+                            ).toString();
+
+                            // The Apps Script one-time response endpoint is GET-only.
+                            // The original POST has already executed on /exec.
+                            requestMethod = "GET";
+                            data = new byte[0];
+                            continue;
+                        }
+
+                        if (code == 307 || code == 308) {
+                            c.disconnect();
+
+                            if (location == null || location.trim().isEmpty()) {
+                                response =
+                                        "{\"ok\":false,\"code\":"
+                                                + code
+                                                + ",\"error\":\"Backend redirect did not provide a redirect URL.\"}";
+                                break;
+                            }
+
+                            currentUrl = new URL(
+                                    new URL(currentUrl),
+                                    location
+                            ).toString();
+                            continue;
+                        }
+
+                        InputStreamReader reader =
+                                new InputStreamReader(
+                                        code >= 400
+                                                ? c.getErrorStream()
+                                                : c.getInputStream(),
+                                        StandardCharsets.UTF_8
+                                );
+
+                        BufferedReader br = new BufferedReader(reader);
+                        StringBuilder sb = new StringBuilder();
+                        String line;
+
+                        while ((line = br.readLine()) != null) {
+                            sb.append(line);
+                        }
+
+                        br.close();
+                        response = sb.toString();
+                        c.disconnect();
+                        break;
+                    }
+
+                    if (response == null || response.trim().isEmpty()) {
+                        response =
+                                "{\"ok\":false,\"code\":"
+                                        + code
+                                        + ",\"error\":\"Backend returned an empty response.\"}";
+                    }
+
+                } catch (Exception e) {
+                    response =
+                            "{\"ok\":false,\"code\":0,\"error\":\"Network error: "
+                                    + escapeJson(e.getMessage())
+                                    + "\"}";
+                }
+
+                final int resultCode = code;
+                final String resultBody = response;
+
+                web.post(() -> {
+                    String payload =
+                            "{\"code\":"
+                                    + resultCode
+                                    + ",\"body\":"
+                                    + JSONObject.quote(resultBody)
+                                    + "}";
+
+                    web.evaluateJavascript(
+                            "window.appHttpResult && window.appHttpResult(window.__mahindraNormalizeResponse("
+                                    + JSONObject.quote(payload)
+                                    + "))",
+                            null
+                    );
+                });
+            }).start();
+        }
+
+        private String extractCookiePair(String setCookie) {
+            int semicolon = setCookie.indexOf(';');
+            String pair = semicolon >= 0
+                    ? setCookie.substring(0, semicolon)
+                    : setCookie;
+            return pair.trim();
+        }
+
+        private String mergeCookie(String existing, String next) {
+            if (existing == null || existing.trim().isEmpty()) return next;
+            if (next == null || next.trim().isEmpty()) return existing;
+            String name = next.split("=", 2)[0].trim();
+            String[] parts = existing.split(";");
+            StringBuilder out = new StringBuilder();
+            boolean replaced = false;
+            for (String part : parts) {
+                String p = part.trim();
+                if (p.isEmpty()) continue;
+                if (out.length() > 0) out.append("; ");
+                if (p.startsWith(name + "=")) { out.append(next); replaced = true; }
+                else out.append(p);
+            }
+            if (!replaced) { if (out.length() > 0) out.append("; "); out.append(next); }
+            return out.toString();
+        }
+
+        @JavascriptInterface
+        public void speakText(String text, String locale) {
+            runOnUiThread(() -> {
+                try {
+                    if (textToSpeech == null) textToSpeech = new TextToSpeech(MainActivity.this, status -> {});
+                    int status = textToSpeech.setLanguage(new Locale(
+                            locale != null && locale.startsWith("hi") ? "hi" :
+                            locale != null && locale.startsWith("kn") ? "kn" : "en", "IN"));
+                    if (status == TextToSpeech.LANG_MISSING_DATA || status == TextToSpeech.LANG_NOT_SUPPORTED) {
+                        sendSpeechError("Text-to-speech language is not available.");
+                        return;
+                    }
+                    textToSpeech.speak(text == null ? "" : text, TextToSpeech.QUEUE_FLUSH, null, "mahindra_read_steps");
+                } catch (Exception e) {
+                    sendSpeechError("Text-to-speech could not start.");
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void startSpeech(String locale) {
+
+            runOnUiThread(() ->
+                    startNativeSpeech(locale)
+            );
+        }
+
+        @JavascriptInterface
+        public void stopSpeech() {
+            runOnUiThread(() -> {
+                try {
+                    if (speechRecognizer != null) {
+                        speechRecognizer.stopListening();
+                    }
+                } catch (Exception ignored) { }
+            });
+        }
+
+        @JavascriptInterface
+        public boolean isSpeechAvailable() {
+            return SpeechRecognizer.isRecognitionAvailable(MainActivity.this);
+        }
+
+        @JavascriptInterface
+        public void openExternalUrl(String url) {
+
+            try {
+
+                startActivity(
+                        new Intent(
+                                Intent.ACTION_VIEW,
+                                Uri.parse(url)
+                        )
+                );
+
+            } catch (Exception e) {
+
+                Toast.makeText(
+                        MainActivity.this,
+                        "Cannot open link",
+                        Toast.LENGTH_SHORT
+                ).show();
+            }
+        }
+
+        @JavascriptInterface
+        public void captureDriverPhoto() {
+            runOnUiThread(() -> openDirectCamera());
+        }
+
+        @JavascriptInterface
+        public void openCamera() {
+
+            runOnUiThread(() -> {
+
+                if (fileCallback == null) {
+
+                    Toast.makeText(
+                            MainActivity.this,
+                            "Use the Take Photo button",
+                            Toast.LENGTH_SHORT
+                    ).show();
+
+                } else {
+
+                    openCameraForFileChooser();
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void saveTextFile(
+                String filename,
+                String content
+        ) {
+
+            runOnUiThread(() -> {
+
+                Intent i =
+                        new Intent(
+                                Intent.ACTION_CREATE_DOCUMENT
+                        );
+
+                i.setType("text/csv");
+
+                i.putExtra(
+                        Intent.EXTRA_TITLE,
+                        filename
+                );
+
+                pendingSaveContent =
+                        content == null
+                                ? ""
+                                : content;
+
+                startActivityForResult(
+                        i,
+                        REQ_FILE + 10
+                );
+            });
+        }
+    }
+
+    private String pendingSaveContent = "";
+
+    private static String escapeJson(String s) {
+
+        if (s == null) {
+            return "";
+        }
+
+        return s
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", " ")
+                .replace("\r", " ");
+    }
+
+    private void startNativeSpeech(String locale) {
+        pendingSpeechLocale = (locale == null || locale.trim().isEmpty()) ? "en-IN" : locale;
+
+        if (ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.RECORD_AUDIO
+        ) != PackageManager.PERMISSION_GRANTED) {
+
+            ActivityCompat.requestPermissions(
+                    this,
+                    new String[]{Manifest.permission.RECORD_AUDIO},
+                    REQ_AUDIO
+            );
+
+            return;
+        }
+
+        runOnUiThread(() -> {
+            try {
+                if (textToSpeech != null) {
+                    try { textToSpeech.stop(); } catch (Exception ignored) {}
+                }
+
+                Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+                intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+                intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, pendingSpeechLocale);
+                intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, pendingSpeechLocale);
+                intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
+                String promptText = "kn-IN".equalsIgnoreCase(pendingSpeechLocale)
+                        ? "ಈಗ ಮಾತನಾಡಿ (ಕನ್ನಡ)..."
+                        : "hi-IN".equalsIgnoreCase(pendingSpeechLocale)
+                        ? "अब बोलें (हिन्दी)..."
+                        : "Speak now (English)...";
+                intent.putExtra(RecognizerIntent.EXTRA_PROMPT, promptText);
+
+                if (intent.resolveActivity(getPackageManager()) != null) {
+                    startActivityForResult(intent, REQ_SPEECH_DIALOG);
+                } else {
+                    tryInProcessSpeechRecognizer(pendingSpeechLocale);
+                }
+            } catch (ActivityNotFoundException anf) {
+                tryInProcessSpeechRecognizer(pendingSpeechLocale);
+            } catch (Exception ex) {
+                tryInProcessSpeechRecognizer(pendingSpeechLocale);
+            }
+        });
+    }
+
+    private void tryInProcessSpeechRecognizer(String locale) {
+        try {
+            if (SpeechRecognizer.isRecognitionAvailable(this)) {
+                if (speechRecognizer != null) {
+                    try { speechRecognizer.destroy(); } catch (Exception ignored) {}
+                    speechRecognizer = null;
+                }
+                speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
+                speechRecognizer.setRecognitionListener(new RecognitionListener() {
+                    @Override public void onReadyForSpeech(Bundle params) {}
+                    @Override public void onBeginningOfSpeech() {}
+                    @Override public void onRmsChanged(float rmsdB) {}
+                    @Override public void onBufferReceived(byte[] buffer) {}
+                    @Override public void onEndOfSpeech() {}
+                    @Override
+                    public void onError(int error) {
+                        switch (error) {
+                            case SpeechRecognizer.ERROR_NO_MATCH:
+                            case SpeechRecognizer.ERROR_SPEECH_TIMEOUT:
+                                sendSpeechResult("");
+                                return;
+                            case SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS:
+                                sendSpeechError("Microphone permission was denied. Please allow microphone in App Settings.");
+                                return;
+                            case SpeechRecognizer.ERROR_AUDIO:
+                                sendSpeechError("Audio recording error. Please check your microphone.");
+                                return;
+                            case SpeechRecognizer.ERROR_NETWORK:
+                            case SpeechRecognizer.ERROR_NETWORK_TIMEOUT:
+                                sendSpeechError("Speech network timeout. Please speak again or type directly.");
+                                return;
+                            case SpeechRecognizer.ERROR_RECOGNIZER_BUSY:
+                                sendSpeechError("Voice recognizer is busy. Please try again.");
+                                return;
+                            default:
+                                sendSpeechError("Voice input ended. You can speak again or type directly.");
+                                return;
+                        }
+                    }
+                    @Override
+                    public void onResults(Bundle results) {
+                        ArrayList<String> matches = results != null
+                                ? results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                                : null;
+                        sendSpeechResult(matches != null && !matches.isEmpty() ? matches.get(0) : "");
+                    }
+                    @Override public void onPartialResults(Bundle partialResults) {}
+                    @Override public void onEvent(int eventType, Bundle params) {}
+                });
+
+                Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+                i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+                i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, locale);
+                i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, locale);
+                i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
+                speechRecognizer.startListening(i);
+            } else {
+                sendSpeechError("Microphone input is unavailable on this device. You can type directly in the box.");
+            }
+        } catch (Exception e) {
+            sendSpeechError("Voice input could not start. You can type directly in the box.");
+        }
+    }
+
+    private void analyzeDriverPhoto() {
+        if (cameraUri == null || web == null) {
+            sendPhotoOcrResult("");
+            return;
+        }
+
+        try {
+            InputImage image = InputImage.fromFilePath(this, cameraUri);
+            TextRecognizer recognizer =
+                    TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
+
+            recognizer.process(image)
+                    .addOnSuccessListener(result -> {
+                        sendPhotoOcrResult(result.getText());
+                        recognizer.close();
+                    })
+                    .addOnFailureListener(error -> {
+                        sendPhotoOcrResult("");
+                        recognizer.close();
+                    });
+        } catch (Exception e) {
+            sendPhotoOcrResult("");
+        }
+    }
+
+    private void sendPhotoOcrResult(String text) {
+        if (web != null) {
+            web.post(() ->
+                    web.evaluateJavascript(
+                            "window.nativePhotoTextResult && window.nativePhotoTextResult("
+                                    + JSONObject.quote(text == null ? "" : text)
+                                    + ")",
+                            null
+                    )
+            );
+        }
+    }
+
+    private void sendSpeechResult(String text) {
+
+        if (web != null) {
+
+            web.post(() ->
+                    web.evaluateJavascript(
+                            "window.nativeSpeechResult && window.nativeSpeechResult("
+                                    + JSONObject.quote(
+                                    text == null
+                                            ? ""
+                                            : text
+                            )
+                                    + ")",
+                            null
+                    )
+            );
+        }
+    }
+
+    private void sendSpeechError(String msg) {
+
+        if (web != null) {
+
+            web.post(() ->
+                    web.evaluateJavascript(
+                            "window.nativeSpeechError && window.nativeSpeechError("
+                                    + JSONObject.quote(msg)
+                                    + ")",
+                            null
+                    )
+            );
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(
+            int requestCode,
+            String[] permissions,
+            int[] grantResults
+    ) {
+
+        super.onRequestPermissionsResult(
+                requestCode,
+                permissions,
+                grantResults
+        );
+
+        if (requestCode == REQ_AUDIO) {
+
+            if (grantResults.length > 0
+                    && grantResults[0]
+                    == PackageManager.PERMISSION_GRANTED) {
+
+                startNativeSpeech(pendingSpeechLocale);
+
+            } else {
+
+                sendSpeechError(
+                        "Microphone permission was denied. Please allow Microphone permission in Android Settings > Apps > Mahindra BSVI Driver Guide AI > Permissions."
+                );
+            }
+
+        } else if (requestCode == REQ_DIRECT_CAMERA) {
+
+            if (grantResults.length > 0
+                    && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+
+                openDirectCamera();
+
+            } else {
+
+                sendCameraResult(false);
+            }
+
+        } else if (requestCode == REQ_CAMERA) {
+
+            if (grantResults.length > 0
+                    && grantResults[0]
+                    == PackageManager.PERMISSION_GRANTED) {
+
+                openCameraForFileChooser();
+
+            } else if (fileCallback != null) {
+
+                fileCallback.onReceiveValue(null);
+
+                fileCallback = null;
+            }
+        }
+    }
+
+    @Override
+    protected void onActivityResult(
+            int requestCode,
+            int resultCode,
+            Intent data
+    ) {
+
+        super.onActivityResult(
+                requestCode,
+                resultCode,
+                data
+        );
+
+        if (requestCode == REQ_SPEECH_DIALOG) {
+            if (resultCode == RESULT_OK && data != null) {
+                ArrayList<String> matches = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
+                sendSpeechResult(matches != null && !matches.isEmpty() ? matches.get(0) : "");
+            } else {
+                sendSpeechResult("");
+            }
+            return;
+        }
+
+        if (requestCode == REQ_DIRECT_CAMERA) {
+
+            boolean ok = resultCode == RESULT_OK && cameraUri != null;
+            sendCameraResult(ok);
+            if (ok) {
+                analyzeDriverPhoto();
+            }
+
+            return;
+        }
+
+        if (requestCode == REQ_FILE) {
+
+            if (fileCallback != null) {
+
+                Uri[] result =
+                        (resultCode == RESULT_OK
+                                && cameraUri != null)
+                                ? new Uri[]{cameraUri}
+                                : null;
+
+                fileCallback.onReceiveValue(result);
+
+                fileCallback = null;
+            }
+
+            return;
+        }
+
+        if (requestCode == REQ_FILE + 10
+                && resultCode == RESULT_OK
+                && data != null
+                && data.getData() != null) {
+
+            try (
+                    OutputStream os =
+                            getContentResolver()
+                                    .openOutputStream(
+                                            data.getData()
+                                    )
+            ) {
+
+                if (os != null) {
+
+                    os.write(
+                            pendingSaveContent
+                                    .getBytes(
+                                            StandardCharsets.UTF_8
+                                    )
+                    );
+                }
+
+                Toast.makeText(
+                        this,
+                        "File saved",
+                        Toast.LENGTH_SHORT
+                ).show();
+
+            } catch (Exception e) {
+
+                Toast.makeText(
+                        this,
+                        "Could not save file",
+                        Toast.LENGTH_SHORT
+                ).show();
+            }
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+
+        if (speechRecognizer != null) {
+            speechRecognizer.destroy();
+        }
+
+        super.onDestroy();
+    }
+
+    @Override
+    public void onBackPressed() {
+
+        if (web != null
+                && web.canGoBack()) {
+
+            web.goBack();
+
+        } else {
+
+            super.onBackPressed();
+        }
+    }
+}

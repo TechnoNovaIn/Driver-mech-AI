@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, shrink-to-fit=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Mahindra BSVI Driver Guide AI — Preview</title>
+<style>
+  /* Preview Toolbar Styling */
+  #previewBar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: #0d1726;
+    color: #fff;
+    z-index: 2147483647;
+    padding: 8px 12px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    box-shadow: 0 3px 15px rgba(0,0,0,0.4);
+    border-bottom: 2px solid #b71c1c;
+    font-size: 13px;
+  }
+  #previewBar strong {
+    color: #ffd800;
+    margin-right: 4px;
+    font-size: 13px;
+    letter-spacing: 0.5px;
+  }
+  .preview-btn {
+    border: 0;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-weight: 700;
+    font-size: 12px;
+    cursor: pointer;
+    background: #1f2d42;
+    color: #fff;
+    transition: all 0.2s;
+  }
+  .preview-btn:hover {
+    background: #b71c1c;
+  }
+  .preview-btn.active {
+    background: #b71c1c;
+    box-shadow: 0 0 8px rgba(183, 28, 28, 0.8);
+  }
+  .preview-frame-wrap {
+    margin-top: 48px;
+    display: flex;
+    justify-content: center;
+    min-height: calc(100vh - 48px);
+    background: #e5e8ec;
+    padding: 16px 0;
+  }
+  .preview-device {
+    width: 390px;
+    max-width: 100vw;
+    min-height: 820px;
+    background: #fff;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.25);
+    border-radius: 28px;
+    overflow: hidden;
+    position: relative;
+    border: 8px solid #1a222d;
+    transition: width 0.25s ease;
+  }
+  .preview-device.device-compact { width: 360px !important; }
+  .preview-device.device-standard { width: 390px !important; }
+  .preview-device.device-large { width: 412px !important; }
+  .preview-device.full {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-height: calc(100vh - 48px) !important;
+    border-radius: 0 !important;
+    border: 0 !important;
+    margin: 0 !important;
+  }
+  .frame-viewport {
+    width: 100%;
+    height: 100%;
+    overflow-y: auto;
+    position: relative;
+  }
+</style>
+</head>
+<body style="margin:0;background:#e5e8ec;">
+
+<div id="previewBar">
+  <strong>ROLES:</strong>
+  <button class="preview-btn" onclick="previewRole('DRIVER', this)">🚚 Driver</button>
+  <button class="preview-btn" onclick="previewRole('MECHANIC', this)">👨‍🔧 Mechanic</button>
+  <button class="preview-btn active" onclick="previewRole('EMPLOYEE', this)">👷 Employee</button>
+  <button class="preview-btn" onclick="previewRole('ADMIN', this)">👑 Admin</button>
+  <button class="preview-btn" onclick="previewLogin()">🔐 Login</button>
+  <span style="border-left:1px solid #334155;height:20px;margin:0 4px"></span>
+  <strong>DEVICES:</strong>
+  <button class="preview-btn" id="btnDevCompact" onclick="setDevicePreset('compact', this)">📱 360px</button>
+  <button class="preview-btn active" id="btnDevStd" onclick="setDevicePreset('standard', this)">📱 390px</button>
+  <button class="preview-btn" id="btnDevLarge" onclick="setDevicePreset('large', this)">📱 412px</button>
+  <button class="preview-btn" id="btnDevFull" onclick="setDevicePreset('full', this)">🖥️ 100% Full</button>
+</div>
+
+<div class="preview-frame-wrap" id="frameWrap">
+  <div class="preview-device" id="deviceBox">
+    <div class="frame-viewport" id="appRoot">
+      <!-- Hidden elements required by app_shell -->
+      <div id="home" class="hide"></div>
+      <div id="screen" class="hide"></div>
+      <div id="topIntro" class="hide"></div>
+      <div id="languagePanel" class="hide"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Mock AndroidBridge to enable all native features right inside any desktop/mobile web browser
+// In-browser mock database storage for realistic preview
+window.__mockWorkRecords = window.__mockWorkRecords || [
+  { id: 'rec_101', date: new Date().toISOString().slice(0,10), vehicleNumber: '-', userName: 'Suresh Patil (Employee)', userId: 'demo_employee', workCompleted: 'Audited 16 trip loading manifests, verified freight delivery receipts, and reconciled vehicle logbooks.', createdAt: new Date(Date.now() - 3600000).toISOString() },
+  { id: 'rec_102', date: new Date().toISOString().slice(0,10), vehicleNumber: 'KA-01-MJ-5020', userName: 'Manjunath B (Mechanic)', userId: 'demo_mechanic', workCompleted: 'Inspected brake shoes, replaced secondary fuel filter, topped up coolant.', createdAt: new Date(Date.now() - 7200000).toISOString() },
+  { id: 'rec_103', date: new Date(Date.now() - 86400000).toISOString().slice(0,10), vehicleNumber: 'KA-34-B-8812', userName: 'Manjunath B (Mechanic)', userId: 'demo_mechanic', workCompleted: 'Performed parked DPF regeneration and cleaned DEF doser valve nozzle.', createdAt: new Date(Date.now() - 86400000).toISOString() }
+];
+
+window.__mockProblemReports = window.__mockProblemReports || [
+  { id: 'prob_101', date: new Date().toISOString().slice(0,10), time: '10:45 AM', vehicleNumber: 'KA-01-MJ-5020', userName: 'Ramesh Kumar', role: 'DRIVER', problem: 'Amber DPF Lamp flashing while driving on highway gradient.', photoText: 'DPF SOOT HIGH', createdAt: new Date().toISOString() },
+  { id: 'prob_102', date: new Date(Date.now() - 86400000).toISOString().slice(0,10), time: '02:15 PM', vehicleNumber: 'KA-34-B-8812', userName: 'Ramesh Kumar', role: 'DRIVER', problem: 'Truck engine is getting too hot on steep climb.', photoText: 'TEMPERATURE WARNING', createdAt: new Date(Date.now() - 86400000).toISOString() }
+];
+
+// Load knowledge base from index.html into window.mahindraKB for live preview search
+fetch('index.html')
+  .then(res => res.text())
+  .then(html => {
+    const match = html.match(/id=["']mahindraKnowledge["'][^>]*>([\s\S]*?)<\/script>/i);
+    if(match && match[1]){
+      try { window.mahindraKB = JSON.parse(match[1]); console.log('Loaded ' + window.mahindraKB.length + ' knowledge chunks for preview'); } catch(e){}
+    }
+  })
+  .catch(err => console.log('Notice: index.html knowledge base:', err));
+
+window.AndroidBridge = {
+  getSharedApiUrl: function() {
+    return 'https://script.google.com/macros/s/AKfycbzZsW6eHeLy8brP9rCE-pVvK3yJyj9ML3zGoHwiGpHysFL8LwZ660Llvj2l8B1xiA4/exec';
+  },
+  cloudRequest: async function(method, url, jsonStr) {
+    console.log('[AndroidBridge cloudRequest]', jsonStr);
+    let payload = {};
+    try { payload = JSON.parse(jsonStr || '{}'); } catch(e){}
+    
+    setTimeout(() => {
+      let resp = { ok: true, code: 200 };
+      if (payload.action === 'login') {
+        const mobile = String(payload.username || '9876543210');
+        resp = {
+          ok: true,
+          code: 200,
+          token: 'demo_token_' + Date.now(),
+          user: {
+            id: 'demo_' + (window.__currentPreviewRole || 'EMPLOYEE').toLowerCase(),
+            name: 'Demo ' + (window.__currentPreviewRole || 'EMPLOYEE'),
+            mobile: mobile,
+            role: window.__currentPreviewRole || 'EMPLOYEE',
+            status: 'ACTIVE'
+          }
+        };
+      } else if (payload.action === 'list_work') {
+        resp = {
+          ok: true,
+          code: 200,
+          records: window.__mockWorkRecords.slice()
+        };
+      } else if (payload.action === 'list_users') {
+        window.__mockUsers = window.__mockUsers || [
+          { id: 'u1', name: 'Ramesh Kumar', mobile: '9876543210', role: 'DRIVER', status: 'ACTIVE' },
+          { id: 'u2', name: 'Manjunath B', mobile: '9845012345', role: 'MECHANIC', status: 'ACTIVE' },
+          { id: 'u3', name: 'Suresh Patil', mobile: '9900112233', role: 'EMPLOYEE', status: 'ACTIVE' },
+          { id: 'u4', name: 'Balaji Fleet Admin', mobile: '9988776655', role: 'ADMIN', status: 'ACTIVE' }
+        ];
+        resp = {
+          ok: true,
+          code: 200,
+          users: window.__mockUsers.slice()
+        };
+      } else if (payload.action === 'add_user') {
+        window.__mockUsers = window.__mockUsers || [
+          { id: 'u1', name: 'Ramesh Kumar', mobile: '9876543210', role: 'DRIVER', status: 'ACTIVE' },
+          { id: 'u2', name: 'Manjunath B', mobile: '9845012345', role: 'MECHANIC', status: 'ACTIVE' },
+          { id: 'u3', name: 'Suresh Patil', mobile: '9900112233', role: 'EMPLOYEE', status: 'ACTIVE' },
+          { id: 'u4', name: 'Balaji Fleet Admin', mobile: '9988776655', role: 'ADMIN', status: 'ACTIVE' }
+        ];
+        const newU = {
+          id: 'u_' + Date.now(),
+          name: payload.name || 'New User',
+          mobile: payload.mobile || '9900000000',
+          role: payload.role || 'EMPLOYEE',
+          status: payload.status || 'ACTIVE'
+        };
+        window.__mockUsers.push(newU);
+        resp = { ok: true, code: 200, user: newU };
+      } else if (payload.action === 'set_user_role') {
+        window.__mockUsers = window.__mockUsers || [];
+        const found = window.__mockUsers.find(u => u.id === payload.userId);
+        if (found) found.role = payload.role;
+        resp = { ok: true, code: 200 };
+      } else if (payload.action === 'set_user_status') {
+        window.__mockUsers = window.__mockUsers || [];
+        const found = window.__mockUsers.find(u => u.id === payload.userId);
+        if (found) found.status = payload.status;
+        resp = { ok: true, code: 200 };
+      } else if (payload.action === 'update_user') {
+        window.__mockUsers = window.__mockUsers || [];
+        const found = window.__mockUsers.find(u => u.id === payload.userId);
+        if (found) {
+          if (payload.name) found.name = payload.name;
+          if (payload.mobile) found.mobile = payload.mobile;
+          if (payload.role) found.role = payload.role;
+          if (payload.status) found.status = payload.status;
+          resp = { ok: true, code: 200, user: found };
+        } else {
+          resp = { ok: false, error: 'User not found.' };
+        }
+      } else if (payload.action === 'list_roles') {
+        window.__mockRoles = window.__mockRoles || [
+          { id: 'role_admin', name: 'ADMIN', description: 'System Administrator with complete access to all dashboards and user management.', permissions: ['manage_employees','create_edit_roles','assign_roles','manage_permissions','view_admin_dashboard','view_employee_dashboard','submit_work_updates','view_vehicle_info'], sortOrder: 1, isSystemRole: true },
+          { id: 'role_mechanic', name: 'MECHANIC', description: 'Service technician handling vehicle repairs, work logs, and diagnostics.', permissions: ['view_employee_dashboard','submit_work_updates','view_vehicle_info'], sortOrder: 2, isSystemRole: true },
+          { id: 'role_employee', name: 'EMPLOYEE', description: 'Fleet operations employee submitting daily task updates and attendance.', permissions: ['view_employee_dashboard','submit_work_updates'], sortOrder: 3, isSystemRole: true },
+          { id: 'role_driver', name: 'DRIVER', description: 'Commercial vehicle driver reporting problems and viewing guides.', permissions: ['view_vehicle_info'], sortOrder: 4, isSystemRole: true }
+        ];
+        const counts = {};
+        (window.__mockUsers || []).forEach(u => { const r = String(u.role).toUpperCase(); counts[r] = (counts[r]||0)+1; });
+        window.__mockRoles.forEach(r => { r.userCount = counts[String(r.name).toUpperCase()] || 0; });
+        resp = { ok: true, code: 200, roles: window.__mockRoles.slice() };
+      } else if (payload.action === 'create_role') {
+        window.__mockRoles = window.__mockRoles || [];
+        const maxOrder = window.__mockRoles.reduce((m, r) => Math.max(m, r.sortOrder || 0), 0);
+        const newR = {
+          id: 'role_' + Date.now(),
+          name: String(payload.name || '').toUpperCase().trim(),
+          description: String(payload.description || '').trim(),
+          permissions: Array.isArray(payload.permissions) ? payload.permissions : [],
+          sortOrder: maxOrder + 1,
+          isSystemRole: false,
+          userCount: 0
+        };
+        window.__mockRoles.push(newR);
+        resp = { ok: true, code: 200, role: newR };
+      } else if (payload.action === 'update_role') {
+        window.__mockRoles = window.__mockRoles || [];
+        const found = window.__mockRoles.find(r => r.id === payload.roleId);
+        if (found) {
+          const oldName = found.name;
+          found.name = String(payload.name || found.name).toUpperCase().trim();
+          found.description = String(payload.description || found.description).trim();
+          if (Array.isArray(payload.permissions)) found.permissions = payload.permissions;
+          if (found.name !== oldName && window.__mockUsers) {
+            window.__mockUsers.forEach(u => { if (u.role === oldName) u.role = found.name; });
+          }
+        }
+        resp = { ok: true, code: 200 };
+      } else if (payload.action === 'save_role_permissions') {
+        window.__mockRoles = window.__mockRoles || [];
+        const found = window.__mockRoles.find(r => r.id === payload.roleId);
+        if (found) found.permissions = Array.isArray(payload.permissions) ? payload.permissions : [];
+        resp = { ok: true, code: 200 };
+      } else if (payload.action === 'reorder_roles') {
+        if (Array.isArray(payload.orderedIds) && window.__mockRoles) {
+          const map = {};
+          payload.orderedIds.forEach((id, idx) => { map[id] = idx + 1; });
+          window.__mockRoles.forEach(r => { if (map[r.id]) r.sortOrder = map[r.id]; });
+          window.__mockRoles.sort((a,b) => (a.sortOrder||0) - (b.sortOrder||0));
+        }
+        resp = { ok: true, code: 200 };
+      } else if (payload.action === 'delete_role') {
+        if (window.__mockRoles) {
+          window.__mockRoles = window.__mockRoles.filter(r => r.id !== payload.roleId);
+        }
+        resp = { ok: true, code: 200 };
+      } else if (payload.action === 'set_user_password') {
+        resp = { ok: true, code: 200 };
+      } else if (payload.action === 'list_problems') {
+        resp = {
+          ok: true,
+          code: 200,
+          records: window.__mockProblemReports.slice()
+        };
+      } else if (payload.action === 'save_work') {
+        const u = (function(){try{return JSON.parse(localStorage.getItem('mahindra_secure_user_v1')||'{}')}catch(e){return {}}})();
+        const newRecord = {
+          id: 'rec_' + Date.now(),
+          date: payload.date || new Date().toISOString().slice(0,10),
+          vehicleNumber: payload.vehicleNumber || '-',
+          userName: u.name || 'Demo Employee',
+          userId: u.id || 'demo_employee',
+          workCompleted: payload.workCompleted || '',
+          createdAt: new Date().toISOString()
+        };
+        window.__mockWorkRecords.unshift(newRecord);
+        resp = { ok: true, code: 200, recordId: newRecord.id };
+      } else if (payload.action === 'save_problem') {
+        const u = (function(){try{return JSON.parse(localStorage.getItem('mahindra_secure_user_v1')||'{}')}catch(e){return {}}})();
+        const now = new Date();
+        const newProb = {
+          id: 'prob_' + Date.now(),
+          date: now.toISOString().slice(0,10),
+          time: now.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }),
+          vehicleNumber: payload.vehicleNumber || '-',
+          userName: u.name || 'Demo Driver',
+          role: u.role || 'DRIVER',
+          problem: payload.problem || '',
+          photoText: payload.photoText || payload.problem || '',
+          createdAt: now.toISOString()
+        };
+        window.__mockProblemReports.unshift(newProb);
+        resp = { ok: true, code: 200, reportId: newProb.id };
+      }
+      if (window.appHttpResult) window.appHttpResult(JSON.stringify(resp));
+    }, 150);
+  },
+  startSpeech: function(locale) {
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      const rec = new SpeechRecognition();
+      rec.lang = locale || 'en-IN';
+      rec.onresult = function(e) {
+        const text = e.results[0][0].transcript;
+        if (window.nativeSpeechResult) window.nativeSpeechResult(text);
+      };
+      rec.onerror = function() {
+        const text = prompt('Voice input simulated. Type what you want to say:');
+        if (window.nativeSpeechResult) window.nativeSpeechResult(text);
+      };
+      rec.start();
+    } else {
+      const text = prompt('Voice input simulated. Type what you want to say:');
+      if (window.nativeSpeechResult) window.nativeSpeechResult(text);
+    }
+  },
+  stopSpeech: function() {
+    console.log('[AndroidBridge stopSpeech]');
+  },
+  isSpeechAvailable: function() {
+    return true;
+  },
+  speakText: function(text, locale) {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = locale || 'en-IN';
+      window.speechSynthesis.speak(u);
+    } else {
+      alert('Text-to-Speech: ' + text);
+    }
+  },
+  captureDriverPhoto: function() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = function() {
+      if (input.files && input.files[0]) {
+        if (window.nativeCameraResult) window.nativeCameraResult(true);
+        if (window.nativePhotoTextResult) window.nativePhotoTextResult('DPF LEVEL HIGH WARNING (P2463)');
+      }
+    };
+    input.click();
+  },
+  saveTextFile: function(filename, content) {
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    link.click();
+  },
+  openExternalUrl: function(url) {
+    window.open(url, '_blank');
+  }
+};
+
+function previewRole(roleName, btnEl) {
+  window.__currentPreviewRole = roleName;
+  const mockUser = {
+    id: 'demo_' + roleName.toLowerCase(),
+    name: 'Demo ' + roleName.charAt(0) + roleName.slice(1).toLowerCase(),
+    mobile: '9876543210',
+    role: roleName,
+    status: 'ACTIVE'
+  };
+  localStorage.setItem('mahindra_secure_token_v1', 'demo_token');
+  localStorage.setItem('mahindra_secure_user_v1', JSON.stringify(mockUser));
+  localStorage.setItem('mahindra_user_role_v2', roleName.toLowerCase());
+  
+  document.querySelectorAll('.preview-btn').forEach(b => b.classList.remove('active'));
+  if (btnEl) btnEl.classList.add('active');
+  
+  if (window.maDashboard) {
+    window.maDashboard();
+  } else {
+    location.reload();
+  }
+}
+
+function previewLogin() {
+  localStorage.removeItem('mahindra_secure_token_v1');
+  localStorage.removeItem('mahindra_secure_user_v1');
+  localStorage.removeItem('mahindra_user_role_v2');
+  location.reload();
+}
+
+function setDevicePreset(preset, btn) {
+  const box = document.getElementById('deviceBox');
+  document.querySelectorAll('#btnDevCompact, #btnDevStd, #btnDevLarge, #btnDevFull').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  box.classList.remove('device-compact', 'device-standard', 'device-large', 'full');
+  if (preset === 'compact') box.classList.add('device-compact');
+  else if (preset === 'standard') box.classList.add('device-standard');
+  else if (preset === 'large') box.classList.add('device-large');
+  else if (preset === 'full') box.classList.add('full');
+}
+
+function toggleDeviceFrame() {
+  const box = document.getElementById('deviceBox');
+  box.classList.toggle('full');
+}
+
+// Set default preview role to EMPLOYEE so the new role is immediately visible
+if (!localStorage.getItem('mahindra_secure_user_v1')) {
+  window.__currentPreviewRole = 'EMPLOYEE';
+  const defaultUser = {
+    id: 'demo_employee',
+    name: 'Demo Employee',
+    mobile: '9900112233',
+    role: 'EMPLOYEE',
+    status: 'ACTIVE'
+  };
+  localStorage.setItem('mahindra_secure_token_v1', 'demo_token');
+  localStorage.setItem('mahindra_secure_user_v1', JSON.stringify(defaultUser));
+  localStorage.setItem('mahindra_user_role_v2', 'employee');
+}
+</script>
+
+<!-- Load the app shell -->
+<script src="app_shell.js"></script>
+
+<script>
+// Initial startup trigger
+window.addEventListener('DOMContentLoaded', () => {
+  setTimeout(() => {
+    if (window.maDashboard) window.maDashboard();
+  }, 100);
+});
+</script>
+
+</body>
+</html>
